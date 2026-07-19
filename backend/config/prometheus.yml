@@ -1,0 +1,52 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'ledgerline-dev'
+    environment: 'development'
+
+scrape_configs:
+  # Rate Limiter Service
+  - job_name: 'rate-limiter'
+    static_configs:
+      - targets: ['rate-limiter:8081']
+    metrics_path: '/metrics'
+
+  # DLQ Handler Service
+  - job_name: 'dlq-handler'
+    static_configs:
+      - targets: ['dlq-handler:8082']
+    metrics_path: '/metrics'
+
+  # Dispatcher Service
+  - job_name: 'dispatcher'
+    static_configs:
+      - targets: ['dispatcher:8000']
+    metrics_path: '/metrics'
+
+  # Kong Gateway
+  - job_name: 'kong'
+    static_configs:
+      - targets: ['kong:8001']
+    metrics_path: '/metrics'
+
+  # Redis
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+
+  # PostgreSQL
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres:5432']
+
+  # RabbitMQ
+  - job_name: 'rabbitmq'
+    static_configs:
+      - targets: ['rabbitmq:15672']
+    metrics_path: '/api/metrics'
+
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']

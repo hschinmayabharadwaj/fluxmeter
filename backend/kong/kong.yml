@@ -1,0 +1,134 @@
+# Kong Declarative Configuration for Ledgerline
+# This configuration sets up services, routes, and plugins for the Ledgerline platform
+
+_format_version: "3.0"
+
+services:
+  # Dispatcher Service
+  - name: dispatcher-service
+    url: http://dispatcher:8000
+    routes:
+      - name: dispatcher-route
+        paths:
+          - /v1/submit
+          - /v1/status
+          - /v1/reconcile
+        methods:
+          - GET
+          - POST
+        strip_path: false
+    plugins:
+      # Rate Limiting Plugin
+      - name: rate-limiting
+        config:
+          minute: 1000
+          policy: redis
+          redis_host: redis
+          redis_port: 6379
+          redis_password: ledgerline_redis_password
+          fault_tolerant: true
+      
+      # Correlation ID Plugin
+      - name: correlation-id
+        config:
+          header_name: X-Correlation-ID
+          generator: uuid
+          echo_downstream: true
+      
+      # Request Termination (for maintenance)
+      - name: request-termination
+        enabled: false
+        config:
+          status_code: 503
+          message: "Service temporarily unavailable"
+
+  # Rate Limiter Service
+  - name: rate-limiter-service
+    url: http://rate-limiter:8081
+    routes:
+      - name: rate-limiter-route
+        paths:
+          - /rate-limit
+        methods:
+          - POST
+        strip_path: false
+
+  # Tenant Management Service
+  - name: tenant-management-service
+    url: http://tenant-management:8084
+    routes:
+      - name: tenant-management-route
+        paths:
+          - /v1/tenants
+        methods:
+          - GET
+          - POST
+          - PATCH
+          - DELETE
+        strip_path: false
+    plugins:
+      # JWT Authentication
+      - name: jwt
+        config:
+          key_claim_name: iss
+          secret_is_base64: false
+          anonymous: null
+
+  # Streaming Dispatcher Service
+  - name: streaming-dispatcher-service
+    url: http://streaming-dispatcher:8083
+    routes:
+      - name: streaming-route
+        paths:
+          - /stream
+        methods:
+          - POST
+          - GET
+        strip_path: false
+    plugins:
+      # Request Size Limiting
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 10
+
+# Global Plugins
+plugins:
+  # CORS
+  - name: cors
+    config:
+      origins:
+        - "*"
+      methods:
+        - GET
+        - POST
+        - PATCH
+        - DELETE
+        - OPTIONS
+      headers:
+        - Accept
+        - Content-Type
+        - Authorization
+        - X-Correlation-ID
+      exposed_headers:
+        - X-Correlation-ID
+        - X-RateLimit-Remaining
+      credentials: true
+      max_age: 3600
+
+  # Request/Response Logging
+  - name: file-log
+    config:
+      path: /var/log/kong/access.log
+      reopen: true
+
+  # Prometheus Metrics
+  - name: prometheus
+    config:
+      per_consumer: false
+
+# Consumers (for testing)
+consumers:
+  - username: development-tenant
+    custom_id: tenant_001
+    tags:
+      - development

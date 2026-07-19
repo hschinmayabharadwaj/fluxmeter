@@ -1,0 +1,3 @@
+# This file will be auto-generated when running: go mod download
+# Run this command in the rate-limiter directory to generate go.sum:
+# cd backend/services/go/rate-limiter && go mod download
