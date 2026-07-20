@@ -198,6 +198,37 @@ CREATE TABLE IF NOT EXISTS data_deletion_requests (
 
 CREATE INDEX idx_deletion_status ON data_deletion_requests(status, created_at);
 
+-- EEOC compliance: AI screening decisions with explainability
+CREATE TABLE IF NOT EXISTS ai_screening_decisions (
+    decision_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+    correlation_id VARCHAR(255), -- Link to ledger entry
+    
+    candidate_id VARCHAR(255) NOT NULL,
+    job_id VARCHAR(255) NOT NULL,
+    
+    decision VARCHAR(50) CHECK (decision IN ('selected', 'rejected', 'waitlist')),
+    confidence_score DECIMAL(5,4),
+    
+    -- Explainability metadata
+    decision_factors JSONB NOT NULL, -- e.g., {"skills_match": 0.85, "experience": 0.72, "cultural_fit": 0.68}
+    top_reasons TEXT[], -- Human-readable reasons
+    
+    model VARCHAR(100) NOT NULL,
+    provider VARCHAR(50) NOT NULL,
+    
+    -- Protected attributes (for bias testing only, never used in decisions)
+    protected_attributes JSONB, -- e.g., {"age_range": "30-40", "gender": "F"}
+    
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    metadata JSONB DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX idx_screening_tenant_created ON ai_screening_decisions(tenant_id, created_at DESC);
+CREATE INDEX idx_screening_candidate ON ai_screening_decisions(candidate_id);
+CREATE INDEX idx_screening_job ON ai_screening_decisions(job_id);
+CREATE INDEX idx_screening_decision ON ai_screening_decisions(decision);
+
 -- EEOC compliance: bias monitoring
 CREATE TABLE IF NOT EXISTS bias_monitoring (
     id BIGSERIAL PRIMARY KEY,
@@ -205,6 +236,7 @@ CREATE TABLE IF NOT EXISTS bias_monitoring (
     
     test_date DATE NOT NULL,
     model VARCHAR(100) NOT NULL,
+    job_id VARCHAR(255),
     
     -- Protected attributes
     protected_group VARCHAR(100) NOT NULL,
@@ -219,12 +251,19 @@ CREATE TABLE IF NOT EXISTS bias_monitoring (
     sample_size INTEGER,
     flagged_for_review BOOLEAN DEFAULT false,
     
+    -- Detailed results
+    protected_selected INTEGER,
+    protected_total INTEGER,
+    comparison_selected INTEGER,
+    comparison_total INTEGER,
+    
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     metadata JSONB DEFAULT '{}'::jsonb
 );
 
 CREATE INDEX idx_bias_tenant_date ON bias_monitoring(tenant_id, test_date DESC);
 CREATE INDEX idx_bias_flagged ON bias_monitoring(flagged_for_review) WHERE flagged_for_review = true;
+CREATE INDEX idx_bias_job ON bias_monitoring(job_id);
 
 -- A/B Testing experiments
 CREATE TABLE IF NOT EXISTS ab_tests (
@@ -245,6 +284,44 @@ CREATE TABLE IF NOT EXISTS ab_tests (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     metadata JSONB DEFAULT '{}'::jsonb
 );
+
+-- CRISPE prompt templates with versioning
+CREATE TABLE IF NOT EXISTS crispe_prompts (
+    prompt_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+    
+    template_name VARCHAR(255) NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    
+    -- CRISPE components
+    capacity TEXT NOT NULL,  -- Task capacity/context
+    role TEXT NOT NULL,      -- AI role definition
+    insight TEXT NOT NULL,   -- Key insight or background
+    statement TEXT NOT NULL, -- Core instruction
+    personality TEXT NOT NULL, -- Tone and style
+    experiment TEXT,         -- Optional experimental instructions
+    
+    -- Validation and quality
+    is_active BOOLEAN DEFAULT true,
+    validation_score DECIMAL(3,2), -- Quality score 0-1
+    
+    -- Performance tracking
+    usage_count INTEGER DEFAULT 0,
+    avg_response_time_ms INTEGER,
+    avg_token_count INTEGER,
+    success_rate DECIMAL(5,4),
+    
+    created_by VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    metadata JSONB DEFAULT '{}'::jsonb,
+    
+    UNIQUE(tenant_id, template_name, version)
+);
+
+CREATE INDEX idx_crispe_tenant_active ON crispe_prompts(tenant_id, is_active);
+CREATE INDEX idx_crispe_template_name ON crispe_prompts(template_name, version DESC);
 
 -- Semantic cache metadata (actual vectors stored in Qdrant)
 CREATE TABLE IF NOT EXISTS semantic_cache_metadata (

@@ -120,11 +120,13 @@ Ledgerline is a **zero-silent-loss** AI orchestration and billing platform desig
 | **FR-110** | Semantic cache with triple-tag | Medium | ⏳ Planned | Qdrant Service | Unit Test |
 | **FR-111** | Cost allocation tagging | High | ✅ Complete | Ledger Schema | Manual Review |
 | **FR-112** | Manual review UI for PARTIAL states | High | ✅ Complete | Frontend Dashboard | UAT |
+| **FR-113** | CRISPE prompt engineering framework | High | ✅ Complete | Routing Service | Integration Test |
+| **FR-114** | Prompt versioning and quality validation | High | ✅ Complete | Routing Service | Unit Test |
 | **FR-201** | GDPR Article 13/14 compliance | Critical | ✅ Complete | DB Schema | Audit |
-| **FR-202** | Consent management APIs | Critical | ⏳ Planned | Tenant Service | Integration Test |
-| **FR-203** | Right to erasure (RTBF) | Critical | ⏳ Planned | Tenant Service | Manual Test |
-| **FR-204** | EEOC adverse impact monitoring | Critical | ⏳ Planned | Compliance Service | Integration Test |
-| **FR-205** | Bias testing framework | Critical | ⏳ Planned | Compliance Service | Audit |
+| **FR-202** | Consent management APIs | Critical | ✅ Complete | Tenant Service | Integration Test |
+| **FR-203** | Right to erasure (RTBF) | Critical | ✅ Complete | Tenant Service | Manual Test |
+| **FR-204** | EEOC adverse impact monitoring | Critical | ✅ Complete | Compliance Service | Integration Test |
+| **FR-205** | Bias testing framework | Critical | ✅ Complete | Compliance Service | Audit |
 | **FR-206** | PII masking and jailbreak detection | High | ⏳ Planned | Guardrails Service | Unit Test |
 | **NFR-301** | Support 100+ concurrent requests | Critical | 🔄 In Progress | Full Stack | k6 Load Test |
 | **NFR-302** | P99 Redis latency < 10ms | High | 🔄 In Progress | Redis Cluster | Prometheus |
@@ -439,13 +441,21 @@ All tests verify zero-silent-loss guarantees.
 - [ ] Qdrant semantic cache
 - [ ] Enkrypt AI guardrails
 
-### Phase 4: Compliance & UI (🔄 In Progress)
-- [ ] EEOC bias monitoring dashboard
-- [ ] GDPR consent management UI
+### Phase 4: Compliance & UI (✅ Complete - Core Features)
+- [x] EEOC bias monitoring framework
+- [x] EEOC automated bias testing
+- [x] AI screening explainability tracking
+- [x] GDPR consent management (create, withdraw, verify)
+- [x] GDPR right to erasure automation
+- [x] GDPR data export (Article 15)
+- [x] CRISPE prompt engineering framework
+- [x] CRISPE template versioning and quality validation
 - [x] Manual Review UI
 - [x] A/B Testing Dashboard
 - [x] Tenant Management Service
 - [x] Kong Gateway configuration
+- [ ] EEOC/GDPR dashboards (UI)
+- [ ] CRISPE template builder (UI)
 
 ---
 
