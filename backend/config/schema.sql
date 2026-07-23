@@ -338,19 +338,55 @@ CREATE TABLE IF NOT EXISTS semantic_cache_metadata (
     prompt_hash VARCHAR(255) NOT NULL,
     response_preview TEXT,
     
+    -- Compliance metadata
+    candidate_email VARCHAR(255),  -- For GDPR consent checks
+    job_id VARCHAR(255),           -- For audit trail
+    model VARCHAR(100),
+    
+    -- Hit tracking
     hit_count INTEGER DEFAULT 0,
     last_hit_at TIMESTAMP,
     
+    -- Token accounting (for billing even on cache hits)
+    estimated_tokens INTEGER DEFAULT 0,
+    
+    -- TTL and expiration
     ttl_seconds INTEGER DEFAULT 3600,
     expires_at TIMESTAMP,
     
+    -- Audit trail
+    created_by VARCHAR(255),  -- Service or user that cached this
+    invalidation_reason VARCHAR(255),  -- Why cache entry was invalidated
+    invalidated_at TIMESTAMP,
+    
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     
     UNIQUE(tenant_id, policy_version, region, provider, prompt_hash)
 );
 
 CREATE INDEX idx_cache_triple_tag ON semantic_cache_metadata(policy_version, region, provider);
 CREATE INDEX idx_cache_expires ON semantic_cache_metadata(expires_at);
+CREATE INDEX idx_cache_candidate ON semantic_cache_metadata(tenant_id, candidate_email);
+CREATE INDEX idx_cache_job ON semantic_cache_metadata(job_id);
+
+-- Cache hit audit log (for compliance and debugging)
+CREATE TABLE IF NOT EXISTS cache_hit_log (
+    id BIGSERIAL PRIMARY KEY,
+    cache_id UUID NOT NULL REFERENCES semantic_cache_metadata(cache_id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(tenant_id),
+    
+    correlation_id VARCHAR(255),
+    ledger_id BIGINT REFERENCES ledger(id),  -- Link to billing record
+    
+    hit_reason VARCHAR(100),  -- "valid_hit", "policy_mismatch", "consent_missing", "rate_limited"
+    similarity_score DECIMAL(5,4),
+    
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_hit_log_cache ON cache_hit_log(cache_id);
+CREATE INDEX idx_hit_log_ledger ON cache_hit_log(ledger_id);
 
 -- Function to auto-update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()

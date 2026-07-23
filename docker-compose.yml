@@ -94,7 +94,7 @@ services:
       - ledgerline
 
   kong-migration:
-    image: kong:3.6-alpine
+    image: kong/kong:3.9.3
     container_name: ledgerline-kong-migration
     command: kong migrations bootstrap
     environment:
@@ -110,7 +110,7 @@ services:
       - ledgerline
 
   kong:
-    image: kong:3.6-alpine
+    image: kong/kong:3.9.3
     container_name: ledgerline-kong
     environment:
       KONG_DATABASE: postgres
