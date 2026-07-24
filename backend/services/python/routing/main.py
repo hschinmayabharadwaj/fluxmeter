@@ -7,6 +7,7 @@ import logging
 import os
 import random
 import re
+import hashlib
 import psycopg2
 import psycopg2.extras
 from typing import Optional, List, Dict
@@ -198,23 +199,70 @@ PERSONALITY: {personality}"""
     return enhanced_prompt
 
 @app.post("/v1/route")
-def route_request(request: RoutingRequest):
+def route_request(request: RoutingRequest, db = Depends(get_db)):
     """
     Determine optimal provider and model for request
-    Supports A/B testing and cost/quality optimization
+    Supports A/B testing with sibling attempt tracking
     """
     try:
+        cursor = db.cursor()
+        
         # Default strategy
         strategy = "balanced"
+        variant_assigned = None
         
-        # A/B testing override
+        # A/B testing: get or assign consistent variant for sibling attempts
         if request.ab_test_id:
-            # In production, look up A/B test configuration
-            # For now, randomize for demo
-            if random.random() < 0.5:
-                strategy = "cost_optimized"
+            # Check if this A/B test has a variant assigned for this tenant
+            cursor.execute("""
+                SELECT variant_assigned, attempt_count
+                FROM ab_tests
+                WHERE ab_test_id = %s AND tenant_id = %s
+                FOR UPDATE  -- Lock row to prevent race conditions
+            """, (request.ab_test_id, request.tenant_id))
+            
+            result = cursor.fetchone()
+            
+            if result:
+                # Existing A/B test: use assigned variant for consistency
+                variant_assigned, attempt_count = result
+                strategy = variant_assigned
+                
+                # Increment sibling attempt count
+                cursor.execute("""
+                    UPDATE ab_tests
+                    SET attempt_count = attempt_count + 1,
+                        last_attempt_at = CURRENT_TIMESTAMP
+                    WHERE ab_test_id = %s AND tenant_id = %s
+                """, (request.ab_test_id, request.tenant_id))
+                
+                logger.info(f"A/B Test {request.ab_test_id}: sibling attempt #{attempt_count + 1} using {strategy}")
             else:
-                strategy = "quality_optimized"
+                # New A/B test: assign variant and track it
+                # Deterministic: hash to ensure same AB test ID always gets same variant
+                test_hash = hashlib.md5(f"{request.ab_test_id}:{request.tenant_id}".encode()).hexdigest()
+                variant_seed = int(test_hash, 16)
+                
+                # Ensure consistent variant assignment (never changes)
+                if variant_seed % 2 == 0:
+                    strategy = "cost_optimized"
+                else:
+                    strategy = "quality_optimized"
+                
+                variant_assigned = strategy
+                
+                # Insert new A/B test tracking record
+                cursor.execute("""
+                    INSERT INTO ab_tests (
+                        ab_test_id, tenant_id, variant_assigned,
+                        attempt_count, created_at, last_attempt_at
+                    ) VALUES (%s, %s, %s, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ON CONFLICT (ab_test_id, tenant_id) DO NOTHING
+                """, (request.ab_test_id, request.tenant_id, strategy))
+                
+                logger.info(f"A/B Test {request.ab_test_id}: new test assigned variant {strategy}")
+        
+        db.commit()
         
         # Get routing decision
         route = ROUTING_STRATEGIES[strategy]["primary"]
@@ -231,11 +279,14 @@ def route_request(request: RoutingRequest):
             "provider": route["provider"],
             "model": route["model"],
             "strategy": strategy,
+            "ab_test_id": request.ab_test_id,
+            "variant_assigned": variant_assigned,
             "fallback_provider": ROUTING_STRATEGIES[strategy]["fallback"]["provider"],
             "fallback_model": ROUTING_STRATEGIES[strategy]["fallback"]["model"]
         }
         
     except Exception as e:
+        db.rollback()
         logger.error(f"Routing failed: {e}")
         raise HTTPException(status_code=500, detail="Routing failed")
 
