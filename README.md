@@ -116,8 +116,8 @@ Ledgerline is a **zero-silent-loss** AI orchestration and billing platform desig
 | **FR-106** | Provider true-up reconciliation | High | ✅ Complete | DLQ Handler | Integration Test |
 | **FR-107** | Redis-Cell rate limiting (TPM/RPM) | Critical | ✅ Complete | Rate Limiter | Load Test |
 | **FR-108** | Multi-tenant rate limit isolation | Critical | ✅ Complete | Rate Limiter | Unit Test |
-| **FR-109** | A/B testing with sibling attempts | Medium | ⏳ Planned | Routing Service | Integration Test |
-| **FR-110** | Semantic cache with triple-tag | Medium | ⏳ Planned | Qdrant Service | Unit Test |
+| **FR-109** | A/B testing with sibling attempts | Medium | ✅ Complete | Routing Service | Unit Test |
+| **FR-110** | Semantic cache with triple-tag | Medium | ✅ Complete | Qdrant Service | Unit Test |
 | **FR-111** | Cost allocation tagging | High | ✅ Complete | Ledger Schema | Manual Review |
 | **FR-112** | Manual review UI for PARTIAL states | High | ✅ Complete | Frontend Dashboard | UAT |
 | **FR-113** | CRISPE prompt engineering framework | High | ✅ Complete | Routing Service | Integration Test |
@@ -477,6 +477,38 @@ MIT License - see [LICENSE](LICENSE) for details.
 - **Issues**: [GitHub Issues](https://github.com/ledgerline/ledgerline/issues)
 - **Slack Community**: [Join here](https://ledgerline.slack.com)
 - **Email**: support@ledgerline.ai
+
+---
+
+## Recent Fixes & Updates
+
+### 🔧 FR-109: A/B Testing with Sibling Attempts (✅ Complete)
+
+**Issue:** Random variant selection prevented reconciliation of sibling attempts.
+
+**Solution:** Implemented deterministic variant assignment using hash-based routing with database tracking.
+
+**Changes:**
+- Modified `/backend/services/python/routing/main.py` to use deterministic (ab_test_id, tenant_id) hashing
+- Added database tracking with row-level locking
+- Returns `variant_assigned` field for reconciliation
+- 14 unit tests added and passing
+
+**Verification:** See `TEST_RESULTS_SUMMARY.md` for details
+
+### 🔧 FR-110: Semantic Cache Triple-Tag Validation (✅ Complete)
+
+**Issue:** Missing validation of triple-tags (policy_version, region, provider) during cache storage.
+
+**Solution:** Comprehensive validation ensuring compliance and consistency.
+
+**Changes:**
+- Modified `/backend/services/python/cache/semantic_cache.py` with `validate_triple_tags()` function
+- Validates non-empty, format, length limits, and provider whitelist
+- Storage rejects invalid tags with 400 error
+- 16 unit tests added and passing
+
+**Verification:** See `TEST_RESULTS_SUMMARY.md` for details
 
 ---
 

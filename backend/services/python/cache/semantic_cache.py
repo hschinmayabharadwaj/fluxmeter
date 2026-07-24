@@ -6,6 +6,7 @@ Integrated with billing, compliance, guardrails, and rate limiting
 import hashlib
 import logging
 import os
+import re
 import psycopg2
 import psycopg2.extras
 import redis
@@ -154,7 +155,7 @@ def generate_embedding(text: str) -> List[float]:
     return np.random.rand(VECTOR_SIZE).tolist()
 
 def create_triple_tag_filter(policy_version: str, region: str, provider: str) -> Filter:
-    """Create filter for triple-tag validation"""
+    """Create filter for triple-tag validation - ensures cache consistency across policy, region, and provider"""
     return Filter(
         must=[
             FieldCondition(key="policy_version", match=MatchValue(value=policy_version)),
@@ -162,6 +163,50 @@ def create_triple_tag_filter(policy_version: str, region: str, provider: str) ->
             FieldCondition(key="provider", match=MatchValue(value=provider))
         ]
     )
+
+def validate_triple_tags(entry: CacheEntry) -> Tuple[bool, List[str]]:
+    """
+    Validate triple-tag consistency before storage
+    
+    Ensures:
+    1. All three tags (policy_version, region, provider) are non-empty
+    2. Tags meet format requirements for compliance tracking
+    3. Tags are compatible (e.g., provider exists in allowed list)
+    
+    Returns: (is_valid, error_messages)
+    """
+    errors = []
+    
+    # Validate policy_version format
+    if not entry.policy_version or not entry.policy_version.strip():
+        errors.append("policy_version cannot be empty")
+    elif len(entry.policy_version) > 255:
+        errors.append("policy_version exceeds max length (255)")
+    elif not re.match(r'^[a-zA-Z0-9._-]+$', entry.policy_version):
+        errors.append("policy_version contains invalid characters (use alphanumeric, ., _, -)")
+    
+    # Validate region format
+    if not entry.region or not entry.region.strip():
+        errors.append("region cannot be empty")
+    elif len(entry.region) > 64:
+        errors.append("region exceeds max length (64)")
+    elif not re.match(r'^[a-zA-Z0-9_-]+$', entry.region):
+        errors.append("region contains invalid characters")
+    
+    # Validate provider format
+    if not entry.provider or not entry.provider.strip():
+        errors.append("provider cannot be empty")
+    elif len(entry.provider) > 64:
+        errors.append("provider exceeds max length (64)")
+    elif not re.match(r'^[a-zA-Z0-9_-]+$', entry.provider):
+        errors.append("provider contains invalid characters")
+    
+    # Validate provider is in allowed list
+    allowed_providers = ["openai", "anthropic", "cohere", "mistral"]
+    if entry.provider.lower() not in allowed_providers:
+        errors.append(f"provider '{entry.provider}' not in allowed list: {allowed_providers}")
+    
+    return len(errors) == 0, errors
 
 def get_current_policy_version(db, tenant_id: str) -> Optional[str]:
     """Get current policy version for tenant"""
@@ -293,7 +338,11 @@ def query_cache_integrated(query: CacheQuery, db = Depends(get_db)):
     start_time = datetime.utcnow()
     
     try:
-        # Step 1: Validate triple tags
+        # Step 1: Validate triple tags exist and are non-empty
+        if not all([query.policy_version, query.region, query.provider]):
+            logger.warning(f"Query triple-tags incomplete: policy={query.policy_version}, region={query.region}, provider={query.provider}")
+            return {"hit": False, "reason": "invalid_tags", "latency_ms": 0}
+        
         tag_filter = create_triple_tag_filter(
             query.policy_version,
             query.region,
@@ -418,16 +467,25 @@ def query_cache_integrated(query: CacheQuery, db = Depends(get_db)):
 
 @app.post("/v1/cache/store")
 def store_in_cache_integrated(entry: CacheEntry, db = Depends(get_db)):
-    """Store response in semantic cache with compliance metadata"""
+    """Store response in semantic cache with compliance metadata and triple-tag validation"""
     try:
         start_time = datetime.utcnow()
+        
+        # Validate triple-tags BEFORE any storage operation
+        tags_valid, tag_errors = validate_triple_tags(entry)
+        if not tags_valid:
+            logger.warning(f"Triple-tag validation failed: {tag_errors}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cache entry triple-tag validation failed: {'; '.join(tag_errors)}"
+            )
         
         # Generate embedding
         prompt_vector = generate_embedding(entry.prompt)
         
-        # Create point
+        # Create point with validated triple-tags
         point_id = hashlib.md5(
-            f"{entry.tenant_id}:{entry.prompt}:{entry.policy_version}".encode()
+            f"{entry.tenant_id}:{entry.prompt}:{entry.policy_version}:{entry.region}:{entry.provider}".encode()
         ).hexdigest()
         
         expires_at = start_time + timedelta(hours=entry.ttl_hours)
@@ -439,9 +497,9 @@ def store_in_cache_integrated(entry: CacheEntry, db = Depends(get_db)):
                 "tenant_id": entry.tenant_id,
                 "prompt": entry.prompt,
                 "response": entry.response,
-                "policy_version": entry.policy_version,
-                "region": entry.region,
-                "provider": entry.provider,
+                "policy_version": entry.policy_version,  # Triple-tag #1
+                "region": entry.region,                   # Triple-tag #2
+                "provider": entry.provider,               # Triple-tag #3
                 "model": entry.model,
                 "ttl_hours": entry.ttl_hours,
                 "estimated_tokens": entry.estimated_tokens,
@@ -459,7 +517,7 @@ def store_in_cache_integrated(entry: CacheEntry, db = Depends(get_db)):
             points=[point]
         )
         
-        # Store metadata in PostgreSQL
+        # Store metadata in PostgreSQL with triple-tag indexed for validation
         cursor = db.cursor()
         cursor.execute("""
             INSERT INTO semantic_cache_metadata (
@@ -467,13 +525,15 @@ def store_in_cache_integrated(entry: CacheEntry, db = Depends(get_db)):
                 policy_version, region, provider,
                 prompt_hash, response_preview,
                 candidate_email, job_id, model, estimated_tokens,
-                created_by, expires_at, ttl_seconds
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                created_by, expires_at, ttl_seconds,
+                triple_tag_validated
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, true)
             ON CONFLICT (tenant_id, policy_version, region, provider, prompt_hash)
             DO UPDATE SET
                 hit_count = 0,
                 last_hit_at = CURRENT_TIMESTAMP,
-                expires_at = EXCLUDED.expires_at
+                expires_at = EXCLUDED.expires_at,
+                triple_tag_validated = true
             RETURNING cache_id
         """, (
             entry.tenant_id, point_id,
@@ -496,15 +556,23 @@ def store_in_cache_integrated(entry: CacheEntry, db = Depends(get_db)):
         
         latency_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
         
-        logger.info(f"Stored in cache: {entry.prompt[:50]}... (policy: {entry.policy_version}, tokens: {entry.estimated_tokens})")
+        logger.info(f"Stored in cache: {entry.prompt[:50]}... (policy: {entry.policy_version}, region: {entry.region}, provider: {entry.provider}, tokens: {entry.estimated_tokens})")
         
         return {
             "cache_id": str(cache_id),
             "qdrant_point_id": point_id,
             "expires_at": expires_at.isoformat(),
+            "triple_tags_validated": True,
+            "triple_tags": {
+                "policy_version": entry.policy_version,
+                "region": entry.region,
+                "provider": entry.provider
+            },
             "latency_ms": latency_ms
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to store in cache: {e}")
         CACHE_OPERATIONS.labels(operation='store', result='error').inc()
