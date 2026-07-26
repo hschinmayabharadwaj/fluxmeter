@@ -230,6 +230,32 @@ def store_idempotency_result(correlation_id: str, result: Dict[str, Any], ttl: i
     redis_client.setex(idem_key, ttl, json.dumps(result))
 
 
+async def call_mock_provider(request: DispatchRequest, provider: str) -> Dict[str, Any]:
+    """Mock provider for testing without API keys"""
+    await asyncio.sleep(0.5)  # Simulate network latency
+    
+    prompt_tokens = sum(len(msg.get('content', '').split()) for msg in request.messages)
+    completion_tokens = 15  # Mock response length
+    
+    mock_responses = {
+        'openai': "This is a mock response from OpenAI. Hello! I'm here to help you with your questions.",
+        'anthropic': "This is a mock response from Anthropic. I'm an AI assistant ready to assist.",
+    }
+    
+    return {
+        'content': mock_responses.get(provider, "Mock response"),
+        'model': request.model,
+        'usage': {
+            'prompt_tokens': prompt_tokens,
+            'completion_tokens': completion_tokens,
+            'total_tokens': prompt_tokens + completion_tokens,
+            'input_tokens': prompt_tokens,  # For Anthropic compatibility
+            'output_tokens': completion_tokens
+        },
+        'finish_reason': 'stop'
+    }
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=10),
@@ -237,6 +263,11 @@ def store_idempotency_result(correlation_id: str, result: Dict[str, Any], ttl: i
 )
 async def call_openai(request: DispatchRequest) -> Dict[str, Any]:
     """Call OpenAI API with circuit breaker and retry logic"""
+    # Check if mock mode is enabled
+    if os.getenv("MOCK_MODE", "false").lower() == "true":
+        logger.info("Using mock OpenAI response")
+        return await call_mock_provider(request, 'openai')
+    
     start_time = time.time()
     
     try:
@@ -272,6 +303,11 @@ async def call_openai(request: DispatchRequest) -> Dict[str, Any]:
 )
 async def call_anthropic(request: DispatchRequest) -> Dict[str, Any]:
     """Call Anthropic API with circuit breaker and retry logic"""
+    # Check if mock mode is enabled
+    if os.getenv("MOCK_MODE", "false").lower() == "true":
+        logger.info("Using mock Anthropic response")
+        return await call_mock_provider(request, 'anthropic')
+    
     start_time = time.time()
     
     try:
