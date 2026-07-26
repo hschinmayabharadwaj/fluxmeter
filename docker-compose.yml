@@ -197,6 +197,7 @@ services:
       RABBITMQ_URL: "amqp://ledgerline:ledgerline_rabbit_password@rabbitmq:5672/"
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      MOCK_MODE: "${MOCK_MODE:-true}"
       PORT: "8000"
     ports:
       - "8002:8000"
